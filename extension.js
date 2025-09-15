@@ -1,5 +1,14 @@
 var vscode = require('vscode')
 
+/**
+ * Escapes characters that have a special meaning in regular expressions.
+ * @param {string} string The string to escape.
+ * @returns {string} The escaped string.
+ */
+function escapeRegExp(string) {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
 const GREMLINS = 'gremlins'
 
 const GREMLINS_LEVELS = {
@@ -43,7 +52,7 @@ function configureDiagnosticsCollection(showDiagnostics) {
 }
 
 function disposeDecorationTypes() {
-  Object.entries(decorationTypes).forEach(([key, decorationType]) => {
+  Object.values(decorationTypes).forEach((decorationType) => {
     decorationType.dispose()
   })
   decorationTypes = {}
@@ -73,12 +82,11 @@ function loadConfiguration(document) {
   const showDiagnostics = gremlinsConfiguration.showInProblemPane
   const diagnosticCollection = configureDiagnosticsCollection(showDiagnostics)
 
-  let regexpWithAllChars = new RegExp(
-    Object.keys(gremlins)
-      .map((char) => `${char}+`)
-      .join('|'),
-    'g',
+  let gremlinPatterns = Object.keys(gremlins).map(
+    (char) => `${escapeRegExp(char)}+`,
   )
+
+  let regexpWithAllChars = new RegExp(gremlinPatterns.join('|'), 'g')
 
   return {
     gremlins,
@@ -132,7 +140,7 @@ function gremlinsFromConfig(gremlinsConfiguration) {
     }
 
     let hexCodePointsRange = hexCodePoint.match(hexCodePointsRangeRegex)
-    if (hexCodePointsRange[2] !== undefined) {
+    if (hexCodePointsRange && hexCodePointsRange[2] !== undefined) {
       // This is a range of characters
       // Lets create all characters of the range, with the same configuration
       let firstChar = parseInt(`0x${hexCodePointsRange[1]}`, 16)
@@ -174,9 +182,6 @@ function charFromHex(hexCodePoint) {
 /**
  *
  * @param {vscode.TextEditor} activeTextEditor
- * @param {*} gremlins
- * @param {RegExp} regexpWithAllChars
- * @param {vscode.DiagnosticCollection} diagnosticCollection
  */
 function checkForGremlins(activeTextEditor) {
   if (!activeTextEditor) {
@@ -188,11 +193,7 @@ function checkForGremlins(activeTextEditor) {
   let { gremlins, regexpWithAllChars, diagnosticCollection } =
     loadConfiguration(doc)
 
-  const decorationOption = {}
-  for (const char in gremlins) {
-    decorationOption[char] = []
-  }
-  /** vscode.Diagnostic[] */
+  const decorations = {}
   let diagnostics = []
 
   for (let lineNum = 0; lineNum < doc.lineCount; lineNum++) {
@@ -201,24 +202,32 @@ function checkForGremlins(activeTextEditor) {
 
     let match
     while ((match = regexpWithAllChars.exec(line))) {
-      const matchedCharacter = match[0][0]
+      const matchedText = match[0]
+      const gremlin = gremlins[matchedText[0]]
 
-      const gremlin = gremlins[matchedCharacter]
+      if (!gremlin) continue
+
       let startPos = new vscode.Position(lineNum, match.index)
-      let endPos = new vscode.Position(lineNum, match.index + match[0].length)
-      const decoration = {
-        range: new vscode.Range(startPos, endPos),
-        hoverMessage:
-          match[0].length +
-          ' ' +
-          gremlin.description +
-          (match[0].length > 1 ? 's' : '') +
-          ' (unicode U+' +
-          gremlin.hexCodePoint +
-          ') here',
-      }
+      let endPos = new vscode.Position(
+        lineNum,
+        match.index + matchedText.length,
+      )
+      const range = new vscode.Range(startPos, endPos)
 
-      decorationOption[matchedCharacter].push(decoration)
+      const hoverMessage = `${matchedText.length} ${gremlin.description}${
+        matchedText.length > 1 ? 's' : ''
+      } (unicode U+${gremlin.hexCodePoint.toUpperCase()}) here`
+
+      const decoration = { range, hoverMessage }
+
+      const decorationType = gremlin.decorationType
+      if (!decorations[decorationType.key]) {
+        decorations[decorationType.key] = {
+          decorationType: decorationType,
+          options: [],
+        }
+      }
+      decorations[decorationType.key].options.push(decoration)
 
       if (diagnosticCollection) {
         const severity = GREMLINS_SEVERITIES[gremlin.level]
@@ -233,8 +242,6 @@ function checkForGremlins(activeTextEditor) {
     }
   }
 
-  const decorations = groupDecorationsByType(gremlins, decorationOption)
-
   drawDecorations(activeTextEditor, decorations)
 
   if (diagnosticCollection) {
@@ -244,28 +251,40 @@ function checkForGremlins(activeTextEditor) {
   processedDocuments[activeTextEditor.document.uri] = { decorations }
 }
 
-function groupDecorationsByType(gremlins, decorationOption) {
-  return Object.entries(gremlins).reduce((obj, [char, gremlin]) => {
-    const decorationType = gremlin.decorationType,
-      options = decorationOption[char]
-
-    if (!obj.hasOwnProperty(decorationType.key)) {
-      obj[decorationType.key] = {
-        decorationType: decorationType,
-        options: options,
-      }
-    } else {
-      obj[decorationType.key].options =
-        obj[decorationType.key].options.concat(options)
-    }
-    return obj
-  }, {})
-}
-
 function drawDecorations(activeTextEditor, decorations) {
   for (const { decorationType, options } of Object.values(decorations)) {
     activeTextEditor.setDecorations(decorationType, options)
   }
+}
+
+function cleanGremlinsInEditor(editor) {
+  if (!editor) {
+    vscode.window.showInformationMessage(
+      'No active editor to clean gremlins from.',
+    )
+    return
+  }
+  const document = editor.document
+  const { gremlins, regexpWithAllChars } = loadConfiguration(document)
+  const fullText = document.getText()
+
+  const cleanedText = fullText.replace(regexpWithAllChars, (matchedChar) => {
+    const gremlin = gremlins[matchedChar[0]]
+    return gremlin?.replaceWith ?? ''
+  })
+
+  if (fullText === cleanedText) {
+    vscode.window.showInformationMessage('No gremlins found to clean.')
+    return
+  }
+
+  const edit = new vscode.WorkspaceEdit()
+  const fullRange = new vscode.Range(
+    document.positionAt(0),
+    document.positionAt(fullText.length),
+  )
+  edit.replace(document.uri, fullRange, cleanedText)
+  vscode.workspace.applyEdit(edit)
 }
 
 /**
@@ -275,57 +294,59 @@ function drawDecorations(activeTextEditor, decorations) {
 function activate(context) {
   loadIcons(context)
 
-  eventListeners.push(
-    vscode.workspace.onDidChangeConfiguration(
-      (event) => {
-        if (event.affectsConfiguration(GREMLINS)) {
-          disposeDecorationTypes()
-          processedDocuments = {}
+  context.subscriptions.push(
+    vscode.commands.registerCommand('gremlins.fixAll', () => {
+      cleanGremlinsInEditor(vscode.window.activeTextEditor)
+    }),
+  )
 
-          vscode.window.visibleTextEditors.forEach((editor) =>
-            checkForGremlins(editor),
-          )
+  context.subscriptions.push(
+    vscode.languages.registerCodeActionsProvider(
+      { scheme: 'file', language: '*' },
+      new GremlinsActionProvider(),
+      {
+        providedCodeActionKinds: [vscode.CodeActionKind.QuickFix],
+      },
+    ),
+  )
+
+  eventListeners.push(
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (event.affectsConfiguration(GREMLINS)) {
+        disposeDecorationTypes()
+        processedDocuments = {}
+
+        vscode.window.visibleTextEditors.forEach((editor) =>
+          checkForGremlins(editor),
+        )
+      }
+    }),
+  )
+
+  eventListeners.push(
+    vscode.window.onDidChangeActiveTextEditor((editor) => {
+      if (editor) {
+        const processedDocument = processedDocuments[editor.document.uri]
+        if (!processedDocument) {
+          checkForGremlins(editor)
+        } else {
+          drawDecorations(editor, processedDocument.decorations)
         }
-      },
-      null,
-      context.subscriptions,
+      }
+    }),
+  )
+
+  eventListeners.push(
+    vscode.workspace.onDidChangeTextDocument((_event) =>
+      checkForGremlins(vscode.window.activeTextEditor),
     ),
   )
 
   eventListeners.push(
-    vscode.window.onDidChangeActiveTextEditor(
-      (editor) => {
-        if (editor) {
-          const processedDocument = processedDocuments[editor.document.uri]
-          if (!processedDocument) {
-            checkForGremlins(editor)
-          } else {
-            drawDecorations(editor, processedDocument.decorations)
-          }
-        }
-      },
-      null,
-      context.subscriptions,
-    ),
-  )
-
-  eventListeners.push(
-    vscode.workspace.onDidChangeTextDocument(
-      (_event) => checkForGremlins(vscode.window.activeTextEditor),
-      null,
-      context.subscriptions,
-    ),
-  )
-
-  eventListeners.push(
-    vscode.workspace.onDidCloseTextDocument(
-      (textDocument) => {
-        diagnosticCollection && diagnosticCollection.delete(textDocument.uri)
-        delete processedDocuments[textDocument.uri]
-      },
-      null,
-      context.subscriptions,
-    ),
+    vscode.workspace.onDidCloseTextDocument((textDocument) => {
+      diagnosticCollection && diagnosticCollection.delete(textDocument.uri)
+      delete processedDocuments[textDocument.uri]
+    }),
   )
 
   checkForGremlins(vscode.window.activeTextEditor)
@@ -345,3 +366,57 @@ function deactivate() {
   eventListeners.length = 0
 }
 exports.deactivate = deactivate
+
+class GremlinsActionProvider {
+  provideCodeActions(document, range, context, token) {
+    const actions = []
+    const gremlinDiagnostics = context.diagnostics.filter(
+      (diag) => diag.source === 'Gremlins tracker',
+    )
+
+    if (gremlinDiagnostics.length === 0) {
+      return
+    }
+
+    const { gremlins } = loadConfiguration(document)
+
+    gremlinDiagnostics.forEach((diag) => {
+      const gremlinText = document.getText(diag.range)
+      const gremlinConfig = gremlins[gremlinText.charAt(0)]
+
+      if (gremlinConfig) {
+        const replacement = gremlinConfig.replaceWith ?? ''
+        const fullReplacementText = replacement.repeat(gremlinText.length)
+        const title = `Fix this: Replace '${gremlinText}' with '${fullReplacementText}'`
+
+        const individualFixAction = new vscode.CodeAction(
+          title,
+          vscode.CodeActionKind.QuickFix,
+        )
+        individualFixAction.edit = new vscode.WorkspaceEdit()
+        individualFixAction.edit.replace(
+          document.uri,
+          diag.range,
+          fullReplacementText,
+        )
+
+        if (actions.length === 0) {
+          individualFixAction.isPreferred = true
+        }
+        actions.push(individualFixAction)
+      }
+    })
+
+    const fixAllAction = new vscode.CodeAction(
+      'Fix all gremlin characters in file',
+      vscode.CodeActionKind.QuickFix,
+    )
+    fixAllAction.command = {
+      command: 'gremlins.fixAll',
+      title: 'Clean All Gremlins',
+    }
+    actions.push(fixAllAction)
+
+    return actions
+  }
+}

@@ -45,7 +45,7 @@
     }
   ],
   "engines": {
-    "vscode": "^1.50.0"
+    "vscode": "^1.99.0"
   },
   "categories": [
     "Linters"
@@ -81,89 +81,108 @@
           "default": {
             "2013": {
               "description": "en dash",
-              "level": "warning"
+              "level": "warning",
+              "replaceWith": "-"
             },
             "2018": {
               "description": "left single quotation mark",
-              "level": "warning"
+              "level": "warning",
+              "replaceWith": "'"
             },
             "2019": {
               "description": "right single quotation mark",
-              "level": "warning"
+              "level": "warning",
+              "replaceWith": "'"
             },
             "2029": {
               "zeroWidth": true,
               "description": "paragraph separator",
-              "level": "error"
+              "level": "error",
+              "replaceWith": " "
             },
             "2066": {
               "zeroWidth": true,
               "description": "Left to right",
-              "level": "error"
+              "level": "error",
+              "replaceWith": ""
             },
             "2069": {
               "zeroWidth": true,
               "description": "Pop directional",
-              "level": "error"
+              "level": "error",
+              "replaceWith": ""
             },
             "0003": {
               "description": "end of text",
-              "level": "warning"
+              "level": "warning",
+              "replaceWith": ""
             },
             "000b": {
               "description": "line tabulation",
-              "level": "warning"
+              "level": "warning",
+              "replaceWith": " "
             },
             "00a0": {
               "description": "non breaking space",
-              "level": "info"
+              "level": "info",
+              "replaceWith": " "
             },
             "00ad": {
               "description": "soft hyphen",
-              "level": "info"
+              "level": "info",
+              "replaceWith": "-"
             },
             "200b": {
               "zeroWidth": true,
               "description": "zero width space",
-              "level": "error"
+              "level": "error",
+              "replaceWith": " "
             },
             "200c": {
               "zeroWidth": true,
               "description": "zero width non-joiner",
-              "level": "warning"
+              "level": "warning",
+              "replaceWith": ""
             },
             "200e": {
               "zeroWidth": true,
               "description": "left-to-right mark",
-              "level": "error"
+              "level": "error",
+              "replaceWith": ""
             },
             "201c": {
               "description": "left double quotation mark",
-              "level": "warning"
+              "level": "warning",
+              "replaceWith": "\""
             },
             "201d": {
               "description": "right double quotation mark",
-              "level": "warning"
+              "level": "warning",
+              "replaceWith": "\""
             },
             "202c": {
               "zeroWidth": true,
               "description": "pop directional formatting",
-              "level": "error"
+              "level": "error",
+              "replaceWith": ""
             },
             "202d": {
               "zeroWidth": true,
               "description": "left-to-right override",
-              "level": "error"
+              "level": "error",
+              "replaceWith": ""
             },
             "202e": {
               "zeroWidth": true,
               "description": "right-to-left override",
-              "level": "error"
+              "level": "error",
+              "replaceWith": ""
             },
             "fffc": {
               "zeroWidth": true,
               "description": "object replacement character",
-              "level": "error"
+              "level": "error",
+              "replaceWith": ""
             }
           },
           "additionalProperties": {
@@ -179,6 +198,10 @@
               "description": {
                 "type": "string",
                 "description": "Description of this character"
+              },
+              "replaceWith": {
+                "type": "string",
+                "description": "A character to replace this gremlin with when using the Quick Fix action. If omitted, the gremlin will be deleted."
               },
               "level": {
                 "type": "string",
@@ -221,6 +244,26 @@
           "description": "Show gremlins in the problem pane"
         }
       }
+    },
+    "commands": [
+      {
+        "command": "gremlins.fixAll",
+        "title": "Gremlins: Clean all gremlin characters in file"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "gremlins.fixAll"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "gremlins.fixAll",
+          "when": "editorTextFocus",
+          "group": "navigation"
+        }
+      ]
     }
   },
   "scripts": {
